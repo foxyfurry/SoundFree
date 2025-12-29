@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>SoundFree — бесплатный хостинг музыки</title>
+  <style>
+    body { font-family: sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; background: #fafafa; }
+    h1 { text-align: center; color: #333; }
+    .upload { background: #eef7ff; padding: 16px; border-radius: 8px; margin: 20px 0; }
+    .track { border: 1px solid #ddd; padding: 12px; margin: 12px 0; border-radius: 6px; background: white; }
+    button { background: #1a73e8; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; }
+    button:hover { opacity: 0.9; }
+    #status { margin-top: 8px; color: #d93025; }
+  </style>
+</head>
+<body>
+  <h1>🎵 SoundFree</h1>
+  
+  <div class="upload">
+    <h3>Загрузи свой трек</h3>
+    <input type="file" id="audioFile" accept="audio/*" />
+    <br><br>
+    <button onclick="uploadTrack()">Загрузить</button>
+    <div id="status"></div>
+  </div>
+
+  <h2>🔥 Чарты (топ прослушиваний)</h2>
+  <div id="charts">Загрузка...</div>
+
+  <script>
+    const REPO = 'YOUR_GITHUB_USERNAME/soundfree'; // ← ЗАМЕНИ НА СВОЙ!
+    let GITHUB_TOKEN = localStorage.getItem('gh_token') || null;
+    let USERNAME = localStorage.getItem('gh_user') || null;
+
+    // Инициализация
+    window.onload = () => {
+      if (!GITHUB_TOKEN) {
+        GITHUB_TOKEN = prompt('🔑 Вставь GitHub Token (с правами repo):');
+        if (GITHUB_TOKEN) {
+          localStorage.setItem('gh_token', GITHUB_TOKEN);
+        }
+      }
+      if (!USERNAME) {
+        USERNAME = prompt('👤 Твой GitHub username:');
+        if (USERNAME) {
+          localStorage.setItem('gh_user', USERNAME);
+        }
+      }
+      loadCharts();
+    };
+
+    // Загрузка чартов
+    async function loadCharts() {
+      try {
+        const res = await fetch(`https://raw.githubusercontent.com/${REPO}/main/data.json?nocache=${Date.now()}`);
+        const data = await res.json();
+        const sorted = [...data.tracks].sort((a, b) => b.listens - a.listens).slice(0, 10);
+        
+        let html = '';
+        for (const t of sorted) {
+          html += `
+            <div class="track">
+              <strong>${t.title}</strong> — ${t.artist}<br>
+              🎧 ${t.listens} прослушиваний<br>
+              <audio controls src="${t.url}" style="width:100%; margin-top:8px;"></audio>
+            </div>
+          `;
+        }
+        document.getElementById('charts').innerHTML = html || 'Нет треков';
+      } catch (e) {
+        document.getElementById('charts').innerHTML = 'Ошибка загрузки';
+        console.error(e);
+      }
+    }
+
+    // Загрузка аудио
+    async function uploadTrack() {
+      const fileInput = document.getElementById('audioFile');
+      const status = document.getElementById('status');
+      const file = fileInput.files[0];
+      
+      if (!file) return alert('Выбери файл!');
+      if (!GITHUB_TOKEN || !USERNAME) return alert('Нужен токен и username!');
+      
+      status.innerText = 'Загружаем...';
+      
+      // 1. Загружаем файл в репо
+      const fileName = `tracks/${Date.now()}-${file.name}`;
+      const reader = new FileReader();
+      reader.onload = async () => {
+        const base64 = reader.result.split(',')[1];
+        
+        const uploadRes = await fetch(`https://api.github.com/repos/${REPO}/contents/${fileName}`, {
+          method: 'PUT',
+          headers: { 'Authorization': `token ${GITHUB_TOKEN}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            message: `Upload ${file.name}`,
+            content: base64,
+            branch: 'main'
+          })
+        });
+
+        if (!uploadRes.ok) {
+          status.innerText = 'Ошибка загрузки файла';
+          return;
+        }
+
+        const { content: { download_url } } = await uploadRes.json();
+
+        // 2. Обновляем data.json
+        const dataRes = await fetch(`https://api.github.com/repos/${REPO}/contents/data.json`);
+        const dataInfo = await dataRes.json();
+        const currentData = JSON.parse(atob(dataInfo.content));
+        
+        currentData.tracks.push({
+          id: `t${Date.now()}`,
+          title: file.name,
+          artist: USERNAME,
+          url: download_url,
+          listens: 0
+        });
+
+        await fetch(`https://api.github.com/repos/${REPO}/contents/data.json`, {
+          method: 'PUT',
+          headers: { 'Authorization': `token ${GITHUB_TOKEN}` },
+          body: JSON.stringify({
+            message: 'Add new track',
+            content: btoa(JSON.stringify(currentData, null, 2)),
+            branch: 'main',
+            sha: dataInfo.sha
+          })
+        });
+
+        status.innerText = '✅ Успешно! Обновляем чарты...';
+        fileInput.value = '';
+        setTimeout(() => {
+          loadCharts();
+          status.innerText = '';
+        }, 1500);
+      };
+      reader.readAsDataURL(file);
+    }
+  </script>
+</body>
+</html>
