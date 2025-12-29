@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Трек — SoundFree</title>
+  <style>
+    body {
+      font-family: sans-serif;
+      max-width: 600px;
+      margin: 40px auto;
+      padding: 20px;
+      background: #fafafa;
+      text-align: center;
+    }
+    .player {
+      width: 100%;
+      margin: 20px 0;
+    }
+    .info {
+      background: white;
+      padding: 16px;
+      border-radius: 8px;
+      margin: 16px 0;
+    }
+    .btn {
+      background: #1a73e8;
+      color: white;
+      border: none;
+      padding: 10px 20px;
+      border-radius: 6px;
+      cursor: pointer;
+      text-decoration: none;
+      display: inline-block;
+      margin-top: 10px;
+    }
+    .btn:hover { opacity: 0.9; }
+  </style>
+</head>
+<body>
+  <h1 id="title">Загрузка...</h1>
+  
+  <div class="info">
+    <p>👤 <span id="artist">—</span></p>
+    <p>🎧 Прослушиваний: <span id="listens">0</span></p>
+  </div>
+
+  <audio id="audioPlayer" class="player" controls></audio>
+  
+  <div>
+    <button class="btn" onclick="shareTrack()">Поделиться ссылкой</button><br>
+    <a href="./" class="btn" style="background:#333; margin-top:10px;">← К чартам</a>
+  </div>
+
+  <script>
+    // === НАСТРОЙКИ ===
+    const REPO = 'foxyfurry/soundfree'; // ← ЗАМЕНИ НА СВОЙ!
+    let GITHUB_TOKEN = localStorage.getItem('gh_token');
+
+    // Получаем ID трека из URL: ?id=t123456
+    const urlParams = new URLSearchParams(window.location.search);
+    const trackId = urlParams.get('id');
+
+    if (!trackId) {
+      document.body.innerHTML = '<h2>❌ Не указан ID трека</h2>';
+    } else {
+      loadTrack(trackId);
+    }
+
+    async function loadTrack(id) {
+      try {
+        const res = await fetch(`https://raw.githubusercontent.com/${REPO}/main/data.json?nocache=${Date.now()}`);
+        const data = await res.json();
+        const track = data.tracks.find(t => t.id === id);
+
+        if (!track) {
+          document.body.innerHTML = '<h2>Трек не найден</h2>';
+          return;
+        }
+
+        // Заполняем данные
+        document.getElementById('title').innerText = track.title;
+        document.getElementById('artist').innerText = track.artist;
+        document.getElementById('listens').innerText = track.listens;
+        document.getElementById('audioPlayer').src = track.url;
+
+        // Увеличиваем счётчик прослушиваний (если есть токен)
+        if (GITHUB_TOKEN) {
+          track.listens += 1;
+          updateListens(data, track);
+        }
+      } catch (e) {
+        console.error(e);
+        document.body.innerHTML = '<h2>Ошибка загрузки трека</h2>';
+      }
+    }
+
+    // Обновляем счётчик в data.json
+    async function updateListens(data, track) {
+      const dataRes = await fetch(`https://api.github.com/repos/${REPO}/contents/data.json`);
+      const dataInfo = await dataRes.json();
+
+      const updatedData = data;
+      const trackIndex = updatedData.tracks.findIndex(t => t.id === track.id);
+      if (trackIndex !== -1) {
+        updatedData.tracks[trackIndex].listens = track.listens;
+      }
+
+      await fetch(`https://api.github.com/repos/${REPO}/contents/data.json`, {
+        method: 'PUT',
+        headers: { 'Authorization': `token ${GITHUB_TOKEN}` },
+        body: JSON.stringify({
+          message: 'Update listens',
+          content: btoa(JSON.stringify(updatedData, null, 2)),
+          branch: 'main',
+          sha: dataInfo.sha
+        })
+      });
+    }
+
+    // Копировать ссылку
+    function shareTrack() {
+      const link = window.location.href;
+      navigator.clipboard.writeText(link).then(() => {
+        alert('Ссылка скопирована! Можешь отправить друзьям.');
+      });
+    }
+  </script>
+</body>
+</html>
